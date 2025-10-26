@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Gasto Ituzaingó</title>
+  <style>
+    :root { --bg:#ffffff; --fg:#111; --pri:#111; --acc:#ffd000; --mut:#888; }
+    *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+    header{position:sticky;top:0;background:#fff;border-bottom:1px solid #eee;padding:10px 12px;display:flex;align-items:center;gap:8px;z-index:10}
+    header h1{font-size:18px;margin:0;flex:1}
+    .pill{padding:6px 10px;border:1px solid #ddd;border-radius:999px;font-size:13px}
+    .wrap{padding:12px;max-width:720px;margin:0 auto}
+    .card{background:#fff;border:1px solid #eee;border-radius:12px;padding:12px;margin:10px 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+    label{font-size:12px;color:#555;display:block;margin-bottom:6px}
+    input,select,button,textarea{width:100%;padding:11px;border:1px solid #ddd;border-radius:10px;font-size:15px}
+    button{background:#111;color:#fff;border:none}
+    button.ghost{background:#f7f7f7;color:#111;border:1px solid #ddd}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .kpi{display:flex;gap:10px}
+    .kpi .box{flex:1;background:#fafafa;border:1px solid #eee;border-radius:10px;padding:10px;text-align:center}
+    .kpi .big{font-size:22px;font-weight:700}
+    .list .item{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-bottom:1px dashed #eee}
+    .item .meta{font-size:12px;color:#666}
+    .tag{background:#111;color:#fff;border-radius:6px;padding:2px 6px;font-size:11px}
+    .actions{display:flex;gap:8px;margin-top:8px}
+    .mut{color:#888;font-size:12px}
+    .total{font-weight:700}
+  </style>
+</head>
+<body>
+<header>
+  <h1>Gasto Ituzaingó</h1>
+  <span class="pill">Saldo: <b id="saldo">0</b></span>
+</header>
+<div class="wrap">
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Límite (mensual)</label>
+        <input type="number" id="limite" placeholder="Ej: 150000">
+      </div>
+      <div>
+        <label>Gastado</label>
+        <input type="text" id="gastado" disabled>
+      </div>
+    </div>
+    <div class="kpi" style="margin-top:10px">
+      <div class="box"><div class="mut">Disponible</div><div class="big" id="disp">$0</div></div>
+      <div class="box"><div class="mut">% usado</div><div class="big" id="pc">0%</div></div>
+    </div>
+    <div class="actions" style="margin-top:10px">
+      <button id="guardarLimite">Guardar límite</button>
+      <button class="ghost" id="reset">Reiniciar mes</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 8px 0">Nuevo gasto / deuda</h3>
+    <div class="row">
+      <div><label>Concepto</label><input id="concepto" placeholder="Ej: Supermercado"></div>
+      <div><label>Categoría</label>
+        <select id="cat">
+          <option>General</option>
+          <option>Comida</option>
+          <option>Transporte</option>
+          <option>Servicios</option>
+          <option>Salud</option>
+          <option>Otros</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div><label>Monto</label><input type="number" id="monto" placeholder="Ej: 4500"></div>
+      <div><label>Fecha</label><input type="date" id="fecha"></div>
+    </div>
+    <div class="actions" style="margin-top:10px">
+      <button id="agregar">Agregar</button>
+      <button class="ghost" id="exportJson">Exportar JSON</button>
+      <button class="ghost" id="exportCsv">Exportar CSV</button>
+      <input type="file" id="importJson" accept="application/json" style="display:none">
+      <button class="ghost" id="importBtn">Importar JSON</button>
+    </div>
+  </div>
+
+  <div class="card list">
+    <h3 style="margin:0 0 8px 0">Listado</h3>
+    <div id="lista"></div>
+  </div>
+</div>
+
+<script>
+const storeKey = 'gasto_ituzaingo_v1';
+const data = JSON.parse(localStorage.getItem(storeKey) || '{"limite":0,"items":[]}');
+const q = sel => document.querySelector(sel);
+
+function fmt(n){ return new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(n||0) }
+function save(){ localStorage.setItem(storeKey, JSON.stringify(data)); render(); }
+function nowDate(){ return new Date().toISOString().slice(0,10); }
+
+function render(){
+  const gastado = data.items.reduce((a,it)=> a + (it.monto - (it.pagado||0)), 0);
+  const disp = Math.max(0, data.limite - gastado);
+  const pc = data.limite>0 ? Math.min(100, Math.round((gastado/data.limite)*100)) : 0;
+
+  q('#limite').value = data.limite || '';
+  q('#gastado').value = fmt(gastado);
+  q('#disp').textContent = fmt(disp);
+  q('#pc').textContent = pc + '%';
+  q('#saldo').textContent = fmt(disp);
+
+  const cont = q('#lista');
+  cont.innerHTML = '';
+  if (data.items.length === 0) {
+    cont.innerHTML = '<div class="mut">Sin registros</div>';
+    return;
+  }
+  data.items.forEach((it, idx)=>{
+    const pendiente = (it.monto - (it.pagado||0));
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.innerHTML = `
+      <div>
+        <div><b>${it.concepto}</b> <span class="tag">${it.categoria}</span></div>
+        <div class="meta">${it.fecha} • Total ${fmt(it.monto)} • Pagado ${fmt(it.pagado||0)} • Pendiente <span class="total">${fmt(pendiente)}</span></div>
+        <div class="actions">
+          <button data-act="pago" data-i="${idx}">Pago parcial</button>
+          <button class="ghost" data-act="pagoTotal" data-i="${idx}">Marcar pagado total</button>
+          <button class="ghost" data-act="editar" data-i="${idx}">Editar</button>
+          <button class="ghost" data-act="borrar" data-i="${idx}">Eliminar</button>
+        </div>
+      </div>
+      <div style="text-align:right;align-self:center">${fmt(pendiente)}</div>
+    `;
+    cont.appendChild(div);
+  });
+}
+
+q('#guardarLimite').onclick = ()=>{
+  const v = parseInt(q('#limite').value||'0',10);
+  data.limite = isNaN(v)?0:v;
+  save();
+};
+
+q('#reset').onclick = ()=>{
+  if(confirm('Reiniciar mes y borrar lista?')){
+    data.items = [];
+    save();
+  }
+};
+
+q('#agregar').onclick = ()=>{
+  const concepto = q('#concepto').value.trim();
+  const monto = parseInt(q('#monto').value||'0',10);
+  const categoria = q('#cat').value;
+  const fecha = q('#fecha').value || nowDate();
+  if(!concepto || !monto){ alert('Complete concepto y monto'); return; }
+  data.items.unshift({ concepto, monto, categoria, fecha, pagado: 0 });
+  q('#concepto').value=''; q('#monto').value='';
+  save();
+};
+
+q('#lista').onclick = (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  const i = parseInt(btn.dataset.i,10);
+  const it = data.items[i];
+  if(btn.dataset.act==='borrar'){
+    if(confirm('Eliminar ítem?')){ data.items.splice(i,1); save(); }
+  } else if(btn.dataset.act==='editar'){
+    const nuevoConcepto = prompt('Concepto', it.concepto) || it.concepto;
+    const nuevoMonto = parseInt(prompt('Monto total', it.monto) || it.monto,10);
+    const nuevaCat = prompt('Categoría', it.categoria) || it.categoria;
+    const nuevaFecha = prompt('Fecha (AAAA-MM-DD)', it.fecha) || it.fecha;
+    it.concepto=nuevoConcepto; it.monto=isNaN(nuevoMonto)?it.monto:nuevoMonto; it.categoria=nuevaCat; it.fecha=nuevaFecha;
+    save();
+  } else if(btn.dataset.act==='pago'){
+    const maxPend = it.monto - (it.pagado||0);
+    const parcial = parseInt(prompt('Importe del pago parcial', maxPend) || '0',10);
+    if(isNaN(parcial) || parcial<=0){ return; }
+    it.pagado = Math.min(it.monto, (it.pagado||0) + parcial);
+    it.hist = it.hist || []; it.hist.push({fecha: nowDate(), pago: parcial});
+    save();
+  } else if(btn.dataset.act==='pagoTotal'){
+    it.pagado = it.monto;
+    it.hist = it.hist || []; it.hist.push({fecha: nowDate(), pago: it.monto});
+    save();
+  }
+};
+
+// export/import
+q('#exportJson').onclick = ()=>{
+  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'gasto_ituzaingo_backup.json'; a.click();
+};
+q('#exportCsv').onclick = ()=>{
+  const rows = [['fecha','concepto','categoria','monto','pagado','pendiente']];
+  data.items.forEach(it=> rows.push([it.fecha,it.concepto,it.categoria,it.monto,(it.pagado||0), (it.monto-(it.pagado||0))]));
+  const csv = rows.map(r=> r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'gasto_ituzaingo_backup.csv'; a.click();
+};
+q('#importBtn').onclick = ()=> q('#importJson').click();
+q('#importJson').addEventListener('change', (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  const fr = new FileReader();
+  fr.onload = ()=>{
+    try{
+      const obj = JSON.parse(fr.result);
+      if(obj && typeof obj==='object' && Array.isArray(obj.items)){
+        data.limite = obj.limite||0; data.items = obj.items||[]; save();
+      } else alert('Archivo inválido');
+    }catch(err){ alert('JSON inválido'); }
+  };
+  fr.readAsText(file);
+});
+render();
+</script>
+</body>
+</html>
